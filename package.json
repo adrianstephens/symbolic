@@ -1,0 +1,52 @@
+{
+	"name": "@isopodlabs/symbolic",
+	"description": "Symbolic mathematics and computer algebra system",
+	"version": "0.1.0",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/adrianstephens/ts-symbolic.git"
+	},
+	"exports": {
+		".": {
+			"require": "./dist/index.js",
+			"import": "./esm/index.js",
+			"browser": "./esm/index.js"
+		}
+	},
+	"files": [
+		"dist/**/*.{js,d.ts}",
+		"esm/**/*.{js,d.ts}"
+	],
+	"scripts": {
+		"build": "tsc -p ./tsconfig.json & tsc -p ./tsconfig.esm.json",
+		"watch": "tsc -watch -p ./",
+		"lint": "eslint \"src/**/*.ts\"",
+		"test": "npx ts-node tests/test-integration.ts"
+	},
+	"keywords": [
+		"symbolic",
+		"computer-algebra",
+		"CAS",
+		"integration",
+		"differentiation",
+		"calculus",
+		"math",
+		"typescript",
+		"pattern-matching",
+		"simplification",
+		"e-graph"
+	],
+	"author": "Adrian Stephens",
+	"license": "MIT",
+	"dependencies": {
+		"@isopodlabs/maths": "^0.5.0"
+	},
+	"devDependencies": {
+		"@types/node": "^22.13.8",
+		"@typescript-eslint/eslint-plugin": "^8.26.0",
+		"@typescript-eslint/parser": "^8.26.0",
+		"eslint": "^9.21.0",
+		"ts-node": "^10.9.2",
+		"typescript-eslint": "^8.26.0"
+	}
+}
