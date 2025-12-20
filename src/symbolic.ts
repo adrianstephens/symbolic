@@ -439,7 +439,10 @@ export class symbolic extends symbolicBase {
 	expand(_opts?: ExpandOptions):	symbolic { return this; }
 	collect(v: string|symbolic):	symbolic[] {
 		const r: symbolic[] = [];
-		r[v === this ? 1 : 0] = this;
+		if (v === this)
+			r[1] = one;
+		else
+			r[0] = this;
 		return r;
 	}
 	integrate(v: string, from: param, to: param):	symbolic {
@@ -456,6 +459,7 @@ export class symbolic extends symbolicBase {
 	sign(): number				{ return Math.sign(this.evaluate()); }
 	lt(b: symbolic): boolean	{ return this.evaluate() < b.evaluate(); }
 
+	asNumeric(): rational | undefined 							{ return; }
 	evaluate(_env?: Record<string, number>):	number			{ return NaN; }
 	evaluateT<T>(_ops: Operators<T>, _env?: Record<string, T>) 	:	T|undefined	{ return undefined; }
 	valueOf():									number 			{ return this.evaluate(); }
@@ -513,9 +517,11 @@ class symbolicConstant extends symbolic {
 		return this.mul(symbolicVariable.create(v));
 	}
 
+	asNumeric() : rational | undefined							{ return rational(this.value); }
 	evaluate(_env?: Record<string, number>) 					{ return this.value; }
 	evaluateT<T>(ops: Operators<T>, _env?: Record<string, T>)	{ return ops.from(this.value); }
 	_toString(opts: StringifyOptions) 							{ return opts.printConst(rational(this.value)); }
+	
 }
 
 const zero	= symbolic.from(0);
@@ -836,15 +842,9 @@ export class symbolicAdd extends symbolic {
 		for (const t of this.terms) {
 			const i = t.item;
 			if (i instanceof symbolicMul) {
-				let pow = 0;
-				const remaining: factor[] = [];
-				for (const ff of i.factors as factor[]) {
-					if (ff.item === v)
-						pow += Number(ff.pow);
-					else
-						remaining.push(ff);
-				}
-				groups[pow] = (groups[pow] ??= zero).add(mulFactors(i.num.scale(t.coef), ...remaining));
+				const vFactor	= i.factors.find(f => f.item === v);
+				const pow		= vFactor ? Number(vFactor.pow) : 0;
+				groups[pow]		= mulFactors(rational(t.coef), ...i.factors.filter(f => f !== vFactor));
 
 			} else if (i === v) {
 				groups[1] = (groups[1] ??= zero).add(symbolic.from(Number(t.coef)));
@@ -1163,6 +1163,25 @@ export class symbolicMul extends symbolic {
 			() => this.factors.map(f => f.item),
 		) as symbolic;
 	}
+
+	_collect(v: symbolic): [number, symbolic] {
+		const vFactor = this.factors.find(f => f.item === v);
+		return [vFactor ? Number(vFactor.pow) : 0, mulFactors(this.num, ...this.factors.filter(f => f !== vFactor))];
+	}
+
+	collect(v: string|symbolic): symbolic[] {
+		if (typeof v === 'string')
+			v = symbolic.variable(v);
+
+		if (this.factors.length == 1 && this.factors[0].pow.is1())
+			return this.factors[0].item.collect(v).map(i => i.mul(this.num));
+
+		const groups: symbolic[] = [];
+		const vFactor = this.factors.find(f => f.item === v);
+		groups[vFactor ? Number(vFactor.pow) : 0] = mulFactors(this.num, ...this.factors.filter(f => f !== vFactor));
+		return groups;
+	}
+
 	expand(opts?: ExpandOptions): symbolic {
 		let factors = this.factors;
 
@@ -1412,7 +1431,10 @@ export class symbolicMul extends symbolic {
 		// Can't integrate - return unevaluated
 		return symbolicIntegral.create(this, x);
 	}
-
+	asNumeric(): rational | undefined {
+		if (this.factors.length === 0)
+			return this.num;
+	}
 	evaluate(env?: Record<string, number>) : number {
 		return this.factors.reduce((acc, curr) => {
 			if (acc !== acc || acc === 0) 	// NaN check & early out for 0

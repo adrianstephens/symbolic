@@ -45,6 +45,9 @@ export default tslint.config(
 			"@typescript-eslint/no-empty-function": "off",
 			"@typescript-eslint/consistent-indexed-object-style": "off",
 			"@typescript-eslint/consistent-type-definitions": "off",
+			//"@typescript-eslint/no-unnecessary-type-assertion": "error",
+			"@typescript-eslint/consistent-type-assertions": ["error", { "assertionStyle": "as", "objectLiteralTypeAssertions": "never" }],
+			"@typescript-eslint/ban-ts-comment": "error",
 			"no-restricted-syntax": [
 				"error",
 				{

@@ -506,7 +506,7 @@ export const generalRules: Rule[] = [
 			.add(Q.scale(-0.5).sub(Delta.rpow(1, 2)).rpow(1, 3))
 		);
 		return PatternRule('cardano-abc-root-A', cardano, bs => bs.A,
-			bs => true
+			_bs => true
 		);
 	})(),
 ];

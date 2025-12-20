@@ -1,8 +1,9 @@
 {
 	"compilerOptions": {
+		"baseUrl": ".",
 		"target": "esnext",
-		"module": "esnext",
-		"moduleResolution": "bundler",
+		"module": "Node16",
+		"moduleResolution": "node16",
 		"strict": true,
 		"declaration": true,
 		"stripInternal": true,
@@ -11,7 +12,8 @@
 		"sourceMap": true,
 		"outDir": "./dist",
 		"lib": [
-			"esnext"
+			"esnext",
+			"dom"
 		]
 	},
 	"include": [

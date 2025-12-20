@@ -21,7 +21,7 @@
 		"build": "tsc -p ./tsconfig.json & tsc -p ./tsconfig.esm.json",
 		"watch": "tsc -watch -p ./",
 		"lint": "eslint \"src/**/*.ts\"",
-		"test": "npx ts-node tests/test-integration.ts"
+		"test": "ts-node -r tsconfig-paths/register -P ./tests/tsconfig.json tests/test-integration.ts"
 	},
 	"keywords": [
 		"symbolic",
@@ -47,6 +47,7 @@
 		"@typescript-eslint/parser": "^8.26.0",
 		"eslint": "^9.21.0",
 		"ts-node": "^10.9.2",
+		"tsconfig-paths": "^4.2.0",
 		"typescript-eslint": "^8.26.0"
 	}
 }

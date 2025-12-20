@@ -1,0 +1,10 @@
+{
+	"extends": "../tsconfig.json",
+	"compilerOptions": {
+		"paths": {
+			"@isopodlabs/maths/*": ["../../maths/dist/*"],
+			"@isopodlabs/maths": ["../../maths/dist"]
+		}
+	},
+	"include": ["../src/**/*.ts","**/*.ts"]
+}
