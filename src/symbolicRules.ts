@@ -1,7 +1,7 @@
 import Gen from '@isopodlabs/maths/gen';
 import rational from '@isopodlabs/maths/rational';
 import { symbolic, MatchOptions, Bindings, term, factor, mulFactors, addTerms, factorAsSymbolic } from './symbolic';
-import { MVPoly, Monomial } from '@isopodlabs/maths/mvpolynomial';
+import { MVPoly, Monomial } from './mvpolynomial';
 
 export type Scorer = (n: symbolic, best?: number) => number;
 
@@ -256,7 +256,7 @@ export function toMVPoly(expr: symbolic, variables: readonly symbolic[]): MVPoly
 	const poly = new MVPoly<symbolic>();
 
 	for (const i of terms) {
-		const mon = new Monomial;
+		const mon = new Monomial(...Array.from({ length: variables.length }, () => 0));
 
 		if (i.item.is('mul')) {
 			const coefFactors: symbolic[] = [symbolic.from(i.coef)];
@@ -272,12 +272,12 @@ export function toMVPoly(expr: symbolic, variables: readonly symbolic[]): MVPoly
 
 			poly.addTerm(mon, coefFactors.length === 0 ? symbolic.from(1) : coefFactors.reduce((a, b) => a.mul(b)));
 		} else {
-			const idx = variables.indexOf(expr);
+			const idx = variables.indexOf(i.item);
 			if (idx >= 0) {
 				mon[idx] = 1;
 				poly.addTerm(mon, symbolic.from(i.coef));
 			} else {
-				poly.addTerm(mon, expr.scale(i.coef));
+				poly.addTerm(mon, i.item.scale(i.coef));
 			}
 		}
 	}

@@ -1,184 +1,196 @@
-import { Polynomial, partialPower, partialFractionsT, hermiteReduce, RationalPolynomial } from '@isopodlabs/maths/polynomial';
+/* eslint-disable no-restricted-syntax */
+import { Polynomial, PolynomialN, PolynomialOver, factorType, squareFreeFactorization, resultantViaPRS, partialFractions, powers, PolyModFactory} from '@isopodlabs/maths/polynomial';
+import gen from '@isopodlabs/maths/gen';
+import integer from '@isopodlabs/maths/integer';
 import rational from '@isopodlabs/maths/rational';
 import { symbolic } from './symbolic';
+import { fillHoles, copyFillHolesVec, permute, LUDecomposeBareiss, LUSolveBareissTranspose } from '@isopodlabs/maths/linear';
 
-export function rationalExpr(num: Polynomial<rational>, den: Polynomial<rational>): RationalPolynomial<rational> {
-	// normalize denom to be monic if possible (divide both by lead coeff)
-	const lc = den.leadCoeff();
-	if (lc && !lc.is1())
-		return { num: num.rscale(lc), den: den.rscale(lc) };
-	return { num, den };
+//const zeta	= symbolic.variable('ζ');
+
+//-----------------------------------------------------------------------------
+//	Hermite
+// Hermite-Ostrogradsky's Algorithm
+//-----------------------------------------------------------------------------
+
+// Hermite reduction for Ni(x) / F^i(x)
+export function hermiteReduction<T extends factorType>(factor: Polynomial<T>, numerators: Polynomial<T>[]): {derivs: Polynomial<T>[], remainder: Polynomial<T>} {
+
+	const multiplicity = numerators.length;
+	if (multiplicity == 1)
+		return {derivs:[], remainder: numerators[0]};
+
+	// A(x)/f(x)^k = d(B(x) / f(x)^(k-1)) / dx + C(x) / f(x)^(k-1)
+	// A(x) = (k - 1) B(x) f'(x) + f(x) B'(x) + C(x) / f(x)
+
+	const zero	= gen.zero(factor.leadCoeff());
+	const one	= gen.from(zero, 1);
+	const fPows: Polynomial<T>[] = [];
+
+	for (let j = 0, fpow = Polynomial([one]); j <= multiplicity; j++, fpow = fpow.mul(factor))
+		fPows[j] = fpow;
+
+	const b		= numerators.reduce((_b, numerator, j) => _b.add(numerator.mul(fPows[multiplicity - j - 1])), Polynomial([zero]));
+
+	const fDer	= factor.deriv();
+	const d		= factor.degree();
+	const A: T[][] = [];
+
+	for (let k = 1; k < multiplicity; k++) {
+		const temp = fDer.mul(fPows[multiplicity - k - 1]).scale(-k);
+		A.push(temp.c);
+		for (let t = 1; t < d; t++)
+			A.push(fPows[multiplicity - k].shift(t - 1).scale(t).add(temp.shift(t)).c);
+	}
+
+	for (let t = 0; t < d; t++)
+		A.push(fPows[multiplicity - 1].shift(t).c);
+
+	fillHoles(A, A.length, zero);
+	const { perm, rank } = LUDecomposeBareiss(A);
+	let x = LUSolveBareissTranspose(A, copyFillHolesVec(b.c, A.length, zero), rank);
+
+	if (x) {
+		x = permute(x, perm, zero);
+		return {
+			derivs: Array.from({length: multiplicity - 1}, (_,i) => Polynomial(x.slice(i * d, (i + 1) * d))),
+			remainder: Polynomial(x.slice((multiplicity - 1) * d, multiplicity * d))
+		};
+	}
+	return {derivs:[], remainder: numerators[0]};
 }
 
-function extractPolynomial(sym: symbolic, varName = 'x'): Polynomial<symbolic> | undefined {
-	const groups = sym.collect(symbolic.variable(varName));
-	return Polynomial(groups);//.map(g => g?.asNumeric() ?? rational(0)));
+//-----------------------------------------------------------------------------
+//	Rothstein
+//-----------------------------------------------------------------------------
+
+export interface rothsteinResult<T> {
+	minPoly:	Polynomial<T>;
+	gcd:		Polynomial<Polynomial<T>>;
+	multiplicity: number;
 }
 
-export function astToRationalExpr(num: symbolic, den: symbolic, varName = 'x'): RationalPolynomial<symbolic> | undefined {
-	const numerPoly = extractPolynomial(num, varName);
-	const denomPoly = extractPolynomial(den, varName);
-	if (numerPoly && denomPoly)
-		return { num: numerPoly, den: denomPoly };
+export function rothsteinTrager<T extends factorType>(A: Polynomial<T>, D: Polynomial<T>) {
+	const results: rothsteinResult<T>[] = [];
+
+	const zero		= gen.zero(A.leadCoeff());
+	const Dd		= D.deriv();
+	const Q			= A.map(c => PolynomialOver('z', [c])).sub(Dd.map(c => PolynomialOver('z', [zero, c])));
+	if (Q.degree() < 0)
+		return results;
+
+	const D1		= D.map(c => PolynomialOver('z', [c]));
+	const R			= resultantViaPRS(D1, Q);
+	const factors	= squareFreeFactorization(R);
+
+	for (const {factor: minPoly, multiplicity} of factors) {
+		// r(z) is an irreducible factor of R(z)
+		const mod = PolyModFactory(minPoly);  // Field K = ℚ[z]/(r(z))
+
+		// Compute gcd in K[x]
+		const D_mod	= D1.map(c => mod.wrap(c));
+		const Q_mod	= Q.map(c => mod.wrap(c));  // reduce poly in z modulo r(z)
+		const gcd	= gen.gcd(D_mod, Q_mod).map(c => c.v);  // GCD in K[x]
+
+		results.push({ minPoly, gcd, multiplicity });
+	}
+	return results;
 }
 
-// Integrate general rational (handles polynomial part + simple real roots)
-export function integrateRational(r: RationalPolynomial<symbolic>, v = 'x'): symbolic | undefined {
-	// handle trivial denominator (pure polynomial) quickly
-	if (r.den.degree() <= 0) {
-		const polyPart = r.num.divmod(r.den);
-		const varSym = symbolic.variable(v);
-		let res = symbolic.zero;
-		for (const i in polyPart.c) {
-			const coef = polyPart.c[i];
-			const power = +i + 1;
-			res = res.add(varSym.ipow(power).mul(coef.div(rational(power))));
-		}
+//-----------------------------------------------------------------------------
+//	integrateRational
+//-----------------------------------------------------------------------------
+
+export function integrateRational(N: Polynomial<symbolic>, D: Polynomial<symbolic>, v = 'x'): symbolic | undefined {
+	let	varSym	= symbolic.variable(v);
+	let res		= symbolic.zero;
+
+	if (D.degree() <= 0) {
+		polyTerm(N.divmod(D));
 		return res;
 	}
 
-	// first try Hermite reduction to extract exact derivative parts and produce a square-free remainder
-	let herm = hermiteReduce(r, symbolic.one);
-	// validate hermite result (must have a non-empty denominator); otherwise ignore hermite output
-	if (herm && (!herm.remainder || !herm.remainder.den || (herm.remainder.den.c.length === 0)))
-		herm = undefined;
+	// try substitution when denominator is a polynomial in x^d and numerator matches du/dx pattern
+	if (N.c.slice(0, -1).every(c => c.sign() === 0)) {
+		const degs	= powers(D);
+		const g		= integer.gcd(...degs);
+		const d 	= N.degree();
 
-	let polyPart: Polynomial<symbolic> | undefined;
-	let derivativeTerms: RationalPolynomial<symbolic>[] = [];
-	let remainder: RationalPolynomial<symbolic> | undefined;
-
-	if (herm) {
-		polyPart = herm.polyPart;
-		derivativeTerms = herm.derivative;
-		remainder = herm.remainder;
-	} else {
-		const resPF = partialFractionsT(r);
-		if (!resPF)
-			return undefined;
-		polyPart = resPF.polyPart;
-		derivativeTerms = [];
-		remainder = { num: r.num, den: r.den };
-	}
-
-	const power = partialPower(remainder);
-	const resPF2 = partialFractionsT(remainder);
-	if (!resPF2)
-		return undefined;
-
-	const { terms } = resPF2;
-	const varSym = power ? symbolic.variable(v).ipow(power) : symbolic.variable(v);
-
-	// integrate polynomial part
-
-	let res = symbolic.zero;
-	for (const i in polyPart.c) {
-		const coef = polyPart.c[i];
-		const power = +i + 1;
-		res = res.add(varSym.ipow(power).mul(coef.div(rational(power))));
-	}
-
-	// first add integrals of derivative terms (their integral is just num/den)
-	for (const dt of derivativeTerms) {
-		// build symbolic numerator and denominator
-		let numerSym = symbolic.zero;
-		for (const i in dt.num.c) {
-			const coef = dt.num.c[i];
-			const term = varSym.ipow(+i).mul(coef);
-			numerSym = numerSym.add(term);
+		if (g > 1 && g % d === 0) {
+			const k = N.c[d - 1];
+			const reduceDen: symbolic[] = [];
+			degs.filter(i => (i % d) === 0).forEach(i => reduceDen[i / d] = D.c[i]);
+			N = Polynomial([k.div(k.from(d))]);
+			D = Polynomial(reduceDen);
+			varSym = varSym.ipow(d);
 		}
-		let denomSym = symbolic.zero;
-		for (const i in dt.den.c) {
-			const coef = dt.den.c[+i];
-			const term = varSym.ipow(+i).mul(coef);
-			denomSym = denomSym.add(term);
-		}
-		if (numerSym && denomSym)
-			res = res ? res.add(numerSym.div(denomSym)) : numerSym.div(denomSym);
 	}
 
-	// integrate partial fraction terms from the (square-free) remainder: support linear factors and quadratic irreducibles
-	for (const t of terms) {
-		const f = t.factor;
-		const d = f.degree();
+	const { polyPart, factors } = partialFractions(N, D);
+	polyTerm(polyPart);
 
-		if (d === 1) {
-			// numerator is constant
-			const a = f.leadCoeff();
-			const c0 = t.numer.c[0] ?? symbolic.zero;
-			const root = f.c[0].neg().div(a);
-			res = res.add(t.order === 1
-				? symbolic.log(varSym.add(root.neg())).mul(c0.div(a))
-				: varSym.add(root.neg()).ipow(-(t.order - 1)).mul(c0.div(rational(-(t.order - 1))))
-			);
-			// linear factor handled fully above for order===1; avoid duplicate handling below
-			if (t.order === 1)
-				continue;
+	function polyTerm(poly: Polynomial<symbolic>) {
+		for (const i in poly.c) {
+			const power = +i + 1;
+			res = res.add(varSym.ipow(power).mul(poly.c[i].div(rational(power))));
+		}
+	}
 
-		} else if (d === 2 && t.order === 1) {
-			// numerator is linear or constant (degree <= 1): represent numer = C * f' + D
-			const a			= f.leadCoeff();
-			const b			= f.c[1] ?? symbolic.zero;
-			const c			= f.c[0];
-			const A			= t.numer.c[1] ?? symbolic.zero;
-			const B			= t.numer.c[0];
-			// f'(x) = 2a x + b
-			// solve A x + B = C*(2a x + b) + D  => compare coefficients
-			const C			= A.div(a.mul(rational(2))).div(rational(1));
-			const D			= B.sub(C.mul(b));
-			// integral: C * ln(f) + D * integral(1/f)
-			// build ln(f)
-			const fSym		= a.mul(varSym.ipow(2)).add(b.mul(varSym)).add(c);
-			const lnExpr	= symbolic.log(fSym).mul(C);
-			// integral of 1/f -> arctan term
-			const disc		= a.mul(c).mul(rational(4)).sub(b.mul(b));
-			const sqrtDisc	= disc.sqrt();
-			const atanArg	= varSym.mul(a.mul(rational(2))).add(b).div(sqrtDisc);
-			const atanTerm	= symbolic.atan(atanArg).mul(D.mul(rational(2))).div(sqrtDisc);
-			res = res.add(lnExpr.add(atanTerm));
-			// already handled this term (quadratic linear-numerator case)
-			// skip the generic "additional support" check below to avoid duplicating the log
+	function logTerm(logArg: PolynomialN<symbolic>, coeff: symbolic) {
+		res = res.add(coeff.mul(symbolic.log(logArg.evaluate(varSym))));
+	}
+
+	for (const { factor, numerators } of factors) {
+		const {derivs, remainder} = hermiteReduction(factor, numerators);
+
+		derivs.forEach((d, i) =>
+			res = res.add(d.evaluate(varSym).div(factor.ipow(i + 1).evaluate(varSym)))
+		);
+
+		if (remainder.degree() < 0)
 			continue;
-		} else {
-			// unsupported factor integration
-			return undefined;
+
+		if (factor.degree() === 1) {
+			logTerm(factor.normalise(), remainder.c[0]);
+			continue;
 		}
 
-		// Additional support: if the numerator is a scalar multiple of the factor derivative
-		// then integral is scalar * ln(f) for any degree (order must be 1).
-		if (t.order === 1) {
-			const fDer = f.deriv();
-			// helper: check if numer = c * fDer for some scalar c
-			function scalarMultipleOf(a: Polynomial<symbolic>, b: Polynomial<symbolic>): symbolic | null {
-				// degrees must match (allow leading zeros)
-				const maxd = Math.max(a.degree(), b.degree());
-				let c: symbolic | null = null;
-				for (let i = 0; i <= maxd; i++) {
-					const ai = a.c[i];
-					const bi = b.c[i];
-					if (!bi) {
-						if (ai)
-							return null;
-						continue;
+		const rt = rothsteinTrager(remainder, factor);
+		for (const {minPoly, gcd} of rt) {
+			const logs = minPoly.realRoots().map(r => {
+				r = r.expand();
+				return {alpha: r, logArg: gcd.map(c => c.evaluate(r).expand()).normalise()};	// Substitute z = α
+			});
+			if (logs.length === 2) {
+				const {alpha: alpha0, logArg: logArg0} = logs[0];
+				const {alpha: alpha1, logArg: logArg1} = logs[1];
+				
+				if (alpha0 === alpha1.conj()) {
+					//atan
+					const c = logArg0.c[0] || symbolic.zero;
+					const c_re = symbolic.re(c);
+					const c_im = symbolic.im(c);
+					
+					if (c_im === symbolic.zero) {
+						// d is real: simpler case; log|c + dx| (need to handle sign)
+						logTerm(logArg0, alpha0.mul(2));
+					} else {
+						// For complex d |g(x)| = √((c + d_r·x)² + (d_i·x)²), arg(g(x)) = arctan(d_i·x / (c + d_r·x))
+						res = res.add(symbolic.re(alpha0).mul(symbolic.log(c_re.add(varSym).pow(2).add(c_im.pow(2)))));
+						res = res.add(symbolic.im(alpha0).mul(-2).mul(symbolic.atan(varSym.div(c_im))));
 					}
-					const thisC = ai.div(bi);
-					if (c === null)
-						c = thisC;
-					else if (!thisC.eq(c))
-						return null;
-				}
-				return c;
-			}
+					continue;
 
-			const c = scalarMultipleOf(t.numer, fDer);
-			if (c) {
-				// build symbolic representation of f
-				let fSymExpr = symbolic.zero;
-				for (const i in f.c)
-					fSymExpr = fSymExpr.add(varSym.ipow(+i).mul(f.c[i]));
-				res = res.add(symbolic.log(fSymExpr).mul(c));
-				continue;
+				} else if (alpha0 === alpha1.neg() && logArg0.c[0] === logArg1.c[0].neg()) {
+					//atanh
+					res = res.add(alpha0.mul(2).mul(symbolic.atanh(varSym).div(logArg0.c[0])));
+					continue;
+				}
 			}
+			for (const {alpha, logArg} of logs)
+				logTerm(logArg, alpha);
 		}
 	}
+	
 	return res;
 }
